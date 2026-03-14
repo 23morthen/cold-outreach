@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react"
 import { supabase } from "./supabaseClient"
+import ResearchAgent from "./ResearchAgent"
 
 const STATUS_CONFIG = {
   identified:   { label: "Identifiziert",  color: "#888" },
@@ -39,7 +40,6 @@ const btn = (label, onClick, variant="primary") => (
   <button onClick={onClick} style={{ padding:"7px 14px", borderRadius:6, border:"1px solid #e2e8f0", background:variant==="primary"?"#6366f1":"transparent", color:variant==="primary"?"#fff":"#4a5568", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>{label}</button>
 )
 
-// ── LOGIN ──────────────────────────────────────────────────────────────────
 function Login() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -69,7 +69,6 @@ function Login() {
   )
 }
 
-// ── MAIN APP ───────────────────────────────────────────────────────────────
 export default function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -85,18 +84,13 @@ export default function App() {
   const [newLink, setNewLink] = useState("")
   const [newActivity, setNewActivity] = useState({ activity_type:"note_added", description:"" })
 
-  // Auth
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); setLoading(false) })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
     return () => subscription.unsubscribe()
   }, [])
 
-  // Load companies
-  useEffect(() => {
-    if (!session) return
-    loadCompanies()
-  }, [session])
+  useEffect(() => { if (session) loadCompanies() }, [session])
 
   const loadCompanies = async () => {
     const { data: cos } = await supabase.from("companies").select("*").order("created_at", { ascending: false })
@@ -158,6 +152,10 @@ export default function App() {
     setCompanies(prev => prev.map(c => c.id === companyId ? { ...c, status: newStatus, activities: act ? [act, ...c.activities] : c.activities } : c))
   }
 
+  const handleResearchUpdate = (updates) => {
+    setCompanies(prev => prev.map(c => c.id === selected ? { ...c, ...updates } : c))
+  }
+
   if (loading) return <div style={{ display:"flex", alignItems:"center", justifyContent:"center", minHeight:"100vh", color:"#718096", fontSize:14 }}>Laden…</div>
   if (!session) return <Login />
 
@@ -188,7 +186,7 @@ export default function App() {
                 <div style={{ fontSize:12, color:"#718096", marginTop:2 }}>{c.industry}{c.website&&` · ${c.website}`}</div>
               </div>
               <div style={{ display:"flex", gap:8, alignItems:"center", flexShrink:0, marginLeft:12 }}>
-                {c.ai_relevance_score && <span style={{ fontSize:12, color:"#10b981" }}>{c.ai_relevance_score}/10</span>}
+                {c.ai_relevance_score && <span style={{ fontSize:12, color:"#10b981", fontWeight:600 }}>{c.ai_relevance_score}/10</span>}
                 <Badge status={c.status}/>
               </div>
             </div>
@@ -197,6 +195,7 @@ export default function App() {
               <span>👤 {c.contacts?.length||0} Kontakte</span>
               <span>⚡ {c.activities?.length||0} Aktivitäten</span>
               {(c.research_links?.length||0)>0&&<span>🔗 {c.research_links.length} Links</span>}
+              {c.ai_relevance_score&&<span style={{color:"#10b981"}}>✦ KI-Analyse vorhanden</span>}
             </div>
           </div>
         ))}
@@ -215,7 +214,7 @@ export default function App() {
       <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
         {inp("Unternehmensname *", newCompany.name, v=>setNewCompany(p=>({...p,name:v})))}
         {inp("Branche", newCompany.industry, v=>setNewCompany(p=>({...p,industry:v})))}
-        {inp("Website", newCompany.website, v=>setNewCompany(p=>({...p,website:v})))}
+        {inp("Website (ohne https://)", newCompany.website, v=>setNewCompany(p=>({...p,website:v})))}
         {inp("Kurzbeschreibung", newCompany.description, v=>setNewCompany(p=>({...p,description:v})),true)}
         {inp("Erste Notiz", newCompany.notes, v=>setNewCompany(p=>({...p,notes:v})),true)}
         <div style={{ display:"flex", gap:8, marginTop:4 }}>
@@ -265,8 +264,8 @@ export default function App() {
 
   // ── DETAIL ──
   if (view === "detail" && company) {
-    const tabs = ["overview","contacts","research","activities"]
-    const tabLabels = { overview:"Übersicht", contacts:"Kontakte", research:"Research", activities:"Aktivitäten" }
+    const tabs = ["overview","ki-research","contacts","research","activities"]
+    const tabLabels = { overview:"Übersicht", "ki-research":"✦ KI-Research", contacts:"Kontakte", research:"Links & Docs", activities:"Aktivitäten" }
     return (
       <div style={s({ padding:20, maxWidth:720, margin:"0 auto" })}>
         <div style={{ display:"flex", alignItems:"flex-start", gap:10, marginBottom:16 }}>
@@ -277,24 +276,41 @@ export default function App() {
           </div>
           <Badge status={company.status}/>
         </div>
+
         <div style={{ display:"flex", gap:4, marginBottom:16, flexWrap:"wrap" }}>
           {Object.entries(STATUS_CONFIG).map(([k,v])=>(
             <button key={k} onClick={()=>updateStatus(company.id,k)} style={{ padding:"4px 10px", borderRadius:20, fontSize:11, cursor:"pointer", fontFamily:"inherit", border:`1px solid ${company.status===k?v.color:"#e2e8f0"}`, background:company.status===k?v.color+"22":"transparent", color:company.status===k?v.color:"#a0aec0" }}>{v.label}</button>
           ))}
         </div>
-        <div style={{ display:"flex", gap:0, borderBottom:"1px solid #e2e8f0", marginBottom:16 }}>
+
+        <div style={{ display:"flex", gap:0, borderBottom:"1px solid #e2e8f0", marginBottom:16, overflowX:"auto" }}>
           {tabs.map(t=>(
-            <button key={t} onClick={()=>setActiveTab(t)} style={{ padding:"8px 16px", border:"none", borderBottom:activeTab===t?"2px solid #6366f1":"2px solid transparent", background:"none", cursor:"pointer", fontSize:13, fontFamily:"inherit", color:activeTab===t?"#6366f1":"#718096", fontWeight:activeTab===t?600:400 }}>{tabLabels[t]}</button>
+            <button key={t} onClick={()=>setActiveTab(t)} style={{ padding:"8px 14px", border:"none", borderBottom:activeTab===t?"2px solid #6366f1":"2px solid transparent", background:"none", cursor:"pointer", fontSize:13, fontFamily:"inherit", color:activeTab===t?"#6366f1":"#718096", fontWeight:activeTab===t?600:400, whiteSpace:"nowrap" }}>{tabLabels[t]}</button>
           ))}
         </div>
 
         {activeTab==="overview"&&(
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            {company.ai_relevance_score&&<div style={{ padding:"12px 14px", borderRadius:8, background:"#10b98111", border:"1px solid #10b98133" }}><div style={{ fontSize:12, fontWeight:600, color:"#10b981" }}>KI-Relevanz-Score</div><div style={{ fontSize:24, fontWeight:600, color:"#10b981", marginTop:4 }}>{company.ai_relevance_score}/10</div></div>}
+            {company.ai_relevance_score&&(
+              <div style={{ padding:"12px 14px", borderRadius:8, background:"#10b98111", border:"1px solid #10b98133", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div>
+                  <div style={{ fontSize:11, fontWeight:600, color:"#10b981" }}>KI-Relevanz-Score</div>
+                  <div style={{ fontSize:24, fontWeight:700, color:"#10b981" }}>{company.ai_relevance_score}/10</div>
+                </div>
+                <button onClick={()=>setActiveTab("ki-research")} style={{ fontSize:12, color:"#10b981", background:"none", border:"1px solid #10b981", borderRadius:6, padding:"4px 10px", cursor:"pointer", fontFamily:"inherit" }}>Details →</button>
+              </div>
+            )}
             {company.description&&<div><div style={{ fontSize:12, fontWeight:600, marginBottom:4, color:"#718096" }}>Beschreibung</div><div style={{ fontSize:13, lineHeight:1.6 }}>{company.description}</div></div>}
+            {company.ai_summary&&<div><div style={{ fontSize:12, fontWeight:600, marginBottom:4, color:"#718096" }}>KI-Zusammenfassung</div><div style={{ fontSize:13, lineHeight:1.6, color:"#4a5568" }}>{company.ai_summary}</div></div>}
             {company.notes&&<div><div style={{ fontSize:12, fontWeight:600, marginBottom:4, color:"#718096" }}>Notizen</div><div style={{ fontSize:13, lineHeight:1.6 }}>{company.notes}</div></div>}
-            <button style={{ padding:"10px 16px", borderRadius:8, border:"1px dashed #e2e8f0", background:"transparent", cursor:"pointer", fontSize:13, color:"#6366f1", fontFamily:"inherit", textAlign:"left" }}>✦ KI-Research starten (Modul 2)</button>
+            {!company.ai_summary&&(
+              <button onClick={()=>setActiveTab("ki-research")} style={{ padding:"10px 16px", borderRadius:8, border:"1px dashed #6366f1", background:"#6366f108", cursor:"pointer", fontSize:13, color:"#6366f1", fontFamily:"inherit", textAlign:"left" }}>✦ KI-Research starten →</button>
+            )}
           </div>
+        )}
+
+        {activeTab==="ki-research"&&(
+          <ResearchAgent company={company} onUpdate={handleResearchUpdate} />
         )}
 
         {activeTab==="contacts"&&(
@@ -306,6 +322,7 @@ export default function App() {
                 <div style={{ display:"flex", gap:12, marginTop:8, flexWrap:"wrap" }}>
                   {ct.email&&<span style={{ fontSize:12, color:"#718096" }}>✉ {ct.email}</span>}
                   {ct.phone&&<span style={{ fontSize:12, color:"#718096" }}>☎ {ct.phone}</span>}
+                  {ct.linkedin_url&&<a href={ct.linkedin_url} target="_blank" rel="noreferrer" style={{ fontSize:12, color:"#0077b5" }}>in LinkedIn</a>}
                 </div>
                 {(ct.contact_points||[]).length>0&&(
                   <div style={{ marginTop:10 }}>
@@ -328,14 +345,19 @@ export default function App() {
             <div>
               <div style={{ fontSize:12, fontWeight:600, marginBottom:8, color:"#718096" }}>Research-Links</div>
               {(company.research_links||[]).map((link,i)=>(
-                <div key={i} style={{ fontSize:12, color:"#6366f1", marginBottom:6, wordBreak:"break-all" }}>{link}</div>
+                <div key={i} style={{ fontSize:12, color:"#6366f1", marginBottom:6, wordBreak:"break-all" }}>
+                  <a href={link} target="_blank" rel="noreferrer" style={{ color:"#6366f1" }}>{link}</a>
+                </div>
               ))}
               <div style={{ display:"flex", gap:8, marginTop:4 }}>
                 {inp("URL hinzufügen", newLink, setNewLink)}
                 <button onClick={addLink} style={{ padding:"8px 12px", background:"#f7fafc", border:"1px solid #e2e8f0", borderRadius:6, cursor:"pointer", color:"#1a202c", whiteSpace:"nowrap", fontFamily:"inherit" }}>+ Link</button>
               </div>
             </div>
-            <button style={{ padding:"10px 16px", borderRadius:8, border:"1px dashed #e2e8f0", background:"transparent", cursor:"pointer", fontSize:13, color:"#6366f1", fontFamily:"inherit", textAlign:"left" }}>✦ KI-Research aus Links generieren (Modul 2)</button>
+            <div style={{ padding:"12px 14px", borderRadius:8, border:"1px dashed #e2e8f0", background:"#f7fafc" }}>
+              <div style={{ fontSize:12, fontWeight:600, marginBottom:4 }}>Dokumente</div>
+              <div style={{ fontSize:12, color:"#a0aec0" }}>Dokument-Upload folgt in Modul 3</div>
+            </div>
           </div>
         )}
 

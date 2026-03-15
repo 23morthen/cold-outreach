@@ -13,7 +13,7 @@ const btn = (label, onClick, variant = "primary", disabled = false) => (
 export default function ResearchAgent({ company, onUpdate }) {
   const [loading, setLoading] = useState(false)
   const [step, setStep] = useState("")
-  const [result, setResult] = useState(null)
+  const [result, setResult] = useState(company.ai_full_result || null)
   const [error, setError] = useState("")
 
   const runResearch = async () => {

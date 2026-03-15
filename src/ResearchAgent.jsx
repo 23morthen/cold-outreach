@@ -107,10 +107,11 @@ Bitte recherchiere das Unternehmen und erstelle eine vollständige Analyse. Antw
       // Save to Supabase
       setStep("Wird gespeichert…")
       await supabase.from("companies").update({
-        ai_summary: parsed.summary,
-        ai_challenges: JSON.stringify(parsed.challenges),
-        ai_relevance_score: parsed.relevance_score,
-      }).eq("id", company.id)
+  ai_summary: parsed.summary,
+  ai_challenges: JSON.stringify(parsed.challenges),
+  ai_relevance_score: parsed.relevance_score,
+  ai_full_result: parsed,
+}).eq("id", company.id)
 
       if (onUpdate) onUpdate({
         ai_summary: parsed.summary,

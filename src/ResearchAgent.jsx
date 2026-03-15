@@ -98,6 +98,18 @@ Bitte recherchiere das Unternehmen und erstelle eine vollständige Analyse. Antw
       try {
         const clean = textBlock.text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()
         parsed = JSON.parse(clean)
+// Strip citation tags from all text fields
+const stripCites = (str) => typeof str === "string" 
+  ? str.replace(/<cite[^>]*>|<\/cite>/g, "").trim() 
+  : str
+parsed.summary = stripCites(parsed.summary)
+parsed.market_position = stripCites(parsed.market_position)
+parsed.relevance_reasoning = stripCites(parsed.relevance_reasoning)
+parsed.talk_track = stripCites(parsed.talk_track)
+parsed.challenges = parsed.challenges?.map(c => ({ ...c, description: stripCites(c.description) }))
+parsed.one_pager = parsed.one_pager ? Object.fromEntries(Object.entries(parsed.one_pager).map(([k,v]) => [k, stripCites(v)])) : parsed.one_pager
+parsed.spin_questions = parsed.spin_questions ? Object.fromEntries(Object.entries(parsed.spin_questions).map(([k,v]) => [k, Array.isArray(v) ? v.map(stripCites) : v])) : parsed.spin_questions
+        
       } catch {
         throw new Error("KI-Antwort konnte nicht verarbeitet werden")
       }

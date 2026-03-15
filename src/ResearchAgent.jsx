@@ -13,7 +13,7 @@ const btn = (label, onClick, variant = "primary", disabled = false) => (
 export default function ResearchAgent({ company, onUpdate }) {
   const [loading, setLoading] = useState(false)
   const [step, setStep] = useState("")
-  const [result, setResult] = useState(company.ai_full_result || null)
+  const [result, setResult] = useState(null)
   const [error, setError] = useState("")
 
   const runResearch = async () => {
@@ -32,11 +32,9 @@ export default function ResearchAgent({ company, onUpdate }) {
 
     try {
       setStep("KI analysiert Unternehmen…")
-      const response = await fetch("/api/research", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 4000,
@@ -89,41 +87,51 @@ Bitte recherchiere das Unternehmen und erstelle eine vollständige Analyse. Antw
 
       const data = await response.json()
 
-      // Extract text from response (handle tool use)
-      const textBlock = data.content?.find(b => b.type === "text")
-      if (!textBlock) throw new Error("Keine Antwort von der KI erhalten")
+      // Extract text from response - find last text block
+      const textBlocks = data.content?.filter(b => b.type === "text") || []
+      if (textBlocks.length === 0) throw new Error("Keine Antwort von der KI erhalten")
+      const textBlock = textBlocks[textBlocks.length - 1]
 
       setStep("Ergebnis wird verarbeitet…")
+
+      // Strip citation tags
+      const stripCites = (str) => typeof str === "string"
+        ? str.replace(/<cite[^>]*>[\s\S]*?<\/cite>/g, "").replace(/<\/?cite[^>]*>/g, "").trim()
+        : str
+
       let parsed
       try {
-        const clean = textBlock.text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()
-        parsed = JSON.parse(clean)
-// Strip citation tags from all text fields
-const stripCites = (str) => typeof str === "string" 
-  ? str.replace(/<cite[^>]*>|<\/cite>/g, "").trim() 
-  : str
-parsed.summary = stripCites(parsed.summary)
-parsed.market_position = stripCites(parsed.market_position)
-parsed.relevance_reasoning = stripCites(parsed.relevance_reasoning)
-parsed.talk_track = stripCites(parsed.talk_track)
-parsed.challenges = parsed.challenges?.map(c => ({ ...c, description: stripCites(c.description) }))
-parsed.one_pager = parsed.one_pager ? Object.fromEntries(Object.entries(parsed.one_pager).map(([k,v]) => [k, stripCites(v)])) : parsed.one_pager
-parsed.spin_questions = parsed.spin_questions ? Object.fromEntries(Object.entries(parsed.spin_questions).map(([k,v]) => [k, Array.isArray(v) ? v.map(stripCites) : v])) : parsed.spin_questions
-        
+        // Try to extract JSON from the text
+        let jsonStr = textBlock.text
+        // Remove markdown code blocks
+        jsonStr = jsonStr.replace(/```json\n?/g, "").replace(/```\n?/g, "")
+        // Find JSON object in text
+        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/)
+        if (!jsonMatch) throw new Error("Kein JSON gefunden")
+        jsonStr = jsonMatch[0]
+        parsed = JSON.parse(jsonStr)
       } catch {
-        throw new Error("KI-Antwort konnte nicht verarbeitet werden")
+        throw new Error("KI-Antwort konnte nicht verarbeitet werden. Bitte nochmal versuchen.")
       }
+
+      // Clean all text fields from citation tags
+      const cleanObj = (obj) => {
+        if (typeof obj === "string") return stripCites(obj)
+        if (Array.isArray(obj)) return obj.map(cleanObj)
+        if (obj && typeof obj === "object") return Object.fromEntries(Object.entries(obj).map(([k,v]) => [k, cleanObj(v)]))
+        return obj
+      }
+      parsed = cleanObj(parsed)
 
       setResult(parsed)
 
       // Save to Supabase
       setStep("Wird gespeichert…")
       await supabase.from("companies").update({
-  ai_summary: parsed.summary,
-  ai_challenges: JSON.stringify(parsed.challenges),
-  ai_relevance_score: parsed.relevance_score,
-  ai_full_result: parsed,
-}).eq("id", company.id)
+        ai_summary: parsed.summary,
+        ai_challenges: JSON.stringify(parsed.challenges),
+        ai_relevance_score: parsed.relevance_score,
+      }).eq("id", company.id)
 
       if (onUpdate) onUpdate({
         ai_summary: parsed.summary,
